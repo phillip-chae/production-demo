@@ -1,0 +1,45 @@
+# Production stage
+FROM python:3.13-slim AS builder
+
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -y install --no-install-recommends libgl1 libmagic1 git\
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# Set home directory
+ARG NAME
+ARG HOME="/etc/production-demo"
+WORKDIR "${HOME}"
+
+COPY pyproject.toml uv.lock ./
+COPY ingestapi/pyproject.toml ingestapi/pyproject.toml
+COPY shared shared
+
+RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${NAME} \
+    uv sync \
+        --link-mode copy \
+        --compile-bytecode \
+        --project ingestapi \
+        --no-install-project \
+        --no-editable
+
+FROM python:3.13-slim
+
+# libg1: opencv module's dependency library
+# libmagic1: python-magic module's dependency library
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -y install --no-install-recommends \
+        libgl1 \
+        libmagic1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG HOME="/etc/production-demo"
+ENV PATH="${HOME}/.venv/bin:${HOME}:$PATH"
+
+WORKDIR "${HOME}"
+COPY --from=builder "${HOME}/.venv" .venv
+COPY ingestapi ingestapi
+
+CMD ["python", "-m", "uvicorn", "ingestapi.main:app", "--host", "0.0.0.0", "--port", "8080"]

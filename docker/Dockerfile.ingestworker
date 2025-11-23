@@ -1,0 +1,47 @@
+# Production stage
+FROM python:3.13-slim AS builder
+
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -y install --no-install-recommends  git\
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# Set home directory
+ARG NAME
+ARG HOME="/etc/production-demo"
+WORKDIR "${HOME}"
+
+COPY pyproject.toml uv.lock ./
+COPY ingestworker/pyproject.toml ingestworker/pyproject.toml
+COPY shared shared
+
+RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${NAME} \
+    uv sync \
+        --link-mode copy \
+        --compile-bytecode \
+        --project ingestworker \
+        --no-install-project \
+        --no-editable
+
+FROM python:3.13-slim
+
+# libg1: opencv module's dependency library
+# libmagic1: python-magic module's dependency library
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -y install --no-install-recommends \
+        libgl1 \
+        libmagic1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set home directory (same as in builder stage for path consistency)
+ARG HOME="/etc/production-demo"
+# Add virtual environment and home to PATH
+ENV PATH="${HOME}/.venv/bin:${HOME}:$PATH"
+
+WORKDIR "${HOME}"
+COPY --from=builder "${HOME}/.venv" .venv
+COPY ingestworker ingestworker
+
+CMD ["python", "-m", "celery", "ingestworker.main:app", "--loglevel=info", "--concurrency=1", "--pool=prefork",  "-n", "ingestworker@%h"]

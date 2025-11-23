@@ -1,0 +1,9 @@
+Storage:
+  Type: 1
+  Host: minio
+  Port: 9000
+
+Redis:
+  Host: redis
+  Port: 6379
+  DB: 0
