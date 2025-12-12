@@ -5,9 +5,9 @@ from io import BytesIO
 import asyncio
 
 from shared.storage import Storage
-from shared.model.ingest import INGEST_BUCKET
-from shared.model.index import IndexResponse
+from shared.constant import INGEST_BUCKET
 from shared.logger import get_logger
+from shared.model.index import IndexResponse
 from ingestworker.container import Container
 from ingestworker.main import app
 from ingestworker.service.ingest import IngestService
@@ -28,6 +28,7 @@ class IngestError(Exception):
 def ingest_task(
     self: Task, # In case we need to access task info or do retries
     key: str,
+    file_name: str,
     # Dependency Injection
     storage: Storage = Provide[Container.storage],
     ingest_service: IngestService = Provide[Container.ingest_service]) -> IndexResponse:
@@ -46,10 +47,23 @@ def ingest_task(
             raise StorageError("failed to download image from storage")
 
         with BytesIO(image_bytes) as image_file:
-            if response := asyncio.run(ingest_service.ingest(image_file)):
+            if response := asyncio.run(ingest_service.ingest(image_file, file_name)):
                 resp = response
+
+        if resp.detail:
+            raise IngestError(resp.detail)
     
     except Exception as e:
+        logger.error("failed to ingest data, deleting image from storage", exc_info=e, extra={
+            "key": key,
+            "bucket": INGEST_BUCKET
+        })
+        if not storage.delete(INGEST_BUCKET, key):
+            logger.error("failed to delete image from storage after ingest failure", extra={
+                "key": key,
+                "bucket": INGEST_BUCKET
+            })
+
         resp.detail = str(e)
 
     finally:

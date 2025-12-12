@@ -7,3 +7,7 @@ Redis:
   Host: redis
   Port: 6379
   DB: 0
+
+MilvusDb: 
+  host: milvus-standalone
+  port: 19530

@@ -1,63 +1,80 @@
 from pathlib import Path
 from typing import BinaryIO
-import torch
-from PIL import Image
-import numpy as np
-import hashlib
 
+from shared.storage import Storage
 from shared.logger import get_logger
-from shared.model.index import IndexData
 from shared.hash.phash import Phasher
-from shared.http_client.index import AsyncHttpIndexClient
+from shared.model.index import IndexItem, IndexResponse, INDEX_BUCKET
+from ingestworker.repo.image import ImageRepository
 
 logger = get_logger(__name__)
 
 class IngestService:
     def __init__(
         self,
-        index_client: AsyncHttpIndexClient
+        repo: ImageRepository,
+        storage: Storage,
     ):
-        self.index_client = index_client
-        self.feature_extractor = self.FeatureExtractor("tf_efficientnetv2_s")
+        from shared.ai.encode import ClipEncoder
+        from magic import Magic
+        self.repo = repo
+        self.storage = storage
+        self.mime_magic = Magic(mime=True)
+        self.encoder = ClipEncoder()
         self.phasher = Phasher()
     
-    async def ingest(self, image_file: str | Path | BinaryIO):
-        
-        if isinstance(image_file, (str, Path)):
-            file = open(image_file, "rb")
-            should_close = True
-        else:
-            file = image_file
-            should_close = False
+    async def ingest(
+        self, 
+        image_file: str | Path | BinaryIO, 
+        file_name: str
+    ) -> IndexResponse:
+        resp = IndexResponse()
+
         try:
-            embedding = self.feature_extractor(file)
-            file.seek(0)
-            sha256 = self._calculate_sha256(file)
-            phash = self._calculate_phash(file)
+            if isinstance(image_file, (str, Path)):
+                file = open(image_file, "rb")
+                should_close = True
+            else:
+                file = image_file
+                should_close = False
+            try:
+                embedding = self.encoder.encode_image(file)
+                file.seek(0)
+                phash = self._calculate_phash(file)
+                image_bytes = file.read()
+                
+            finally:
+                if should_close:
+                    file.close()
+
+            data = IndexItem(
+                id=phash,
+                file_name=file_name,
+                embedding=embedding,
+            )
+            logger.debug("Ingested data prepared", extra={
+                "phash": phash,
+                "file_name": file_name
+            })
+            # Because no interaction with other dbs and data types are necessary, I handle the storing in the same function;
+            # in real implementation, I would separate them with a separate indexing application/service
+            ids = await self.repo.create([data])
+            # In real implementation, I would determine image type based on magic, and mark the metadata to the object
+            self.storage.upload(INDEX_BUCKET, image_bytes, phash, extra_args={
+                "ContentType": self.mime_magic.from_buffer(image_bytes)
+            })
+            
+            logger.debug("data indexed successfully", extra={
+                "phash": phash,
+                "file_name": file_name,
+                "ids": ids
+            })
+        except Exception as e:
+            logger.error("failed to ingest data", exc_info=e)
+            resp.detail = str(e)
             
         finally:
-            if should_close:
-                file.close()
-
-        data = IndexData(
-            sha256=sha256,
-            phash=phash,
-            embedding=embedding.tolist()
-        )
-        logger.debug("Ingested data prepared", extra={
-            "sha256": sha256,
-            "phash": phash
-        })
-        return await self.index_client.create_index(data)
-    
-    def _calculate_sha256(self, image_file: BinaryIO) -> str:
-        h = hashlib.sha256()
-        with image_file as f:
-            f.seek(0)
-            while chunk := f.read(8192):
-                h.update(chunk)
-            f.seek(0)
-            return h.hexdigest()
+            return resp
     
     def _calculate_phash(self, image_file: BinaryIO) -> str:
         with image_file as f:
@@ -66,38 +83,4 @@ class IngestService:
             f.seek(0)
             return phash
 
-    class FeatureExtractor:
-        def __init__(
-            self, 
-            model_name: str,
-            normalize: bool = True
-        ):
-            import timm
-            from timm.data import resolve_model_data_config
-            from timm.data.transforms_factory import create_transform
-            self.normalize = normalize
-            # Load the pre-trained model
-            self.model = timm.create_model(
-                model_name, pretrained=True, num_classes=0, global_pool="avg"
-            )
-            self.model.eval()
-
-            config = resolve_model_data_config(self.model)
-            # Get the preprocessing function provided by TIMM for the model
-            self.transform = create_transform(**config)
-
-        def __call__(self, image_file: str | Path | BinaryIO) -> np.ndarray:
-            # Preprocess the input image
-            img = Image.open(image_file).convert("RGB")  # Convert to RGB if needed
-            tensor = self.transform(img).unsqueeze(0)  # type: ignore
-
-            with torch.no_grad():
-                features = self.model(tensor)
-
-            # Extract the feature vector
-            feature_vector = features.squeeze().numpy()
-        
-            if self.normalize:
-                feature_vector = feature_vector / np.linalg.norm(feature_vector)
-
-            return feature_vector
+    

@@ -1,8 +1,9 @@
 from dependency_injector import containers, providers
 
 from shared.storage import new_storage, Storage
-from shared.http_client.index import AsyncHttpIndexClient
+
 from ingestworker.config import Config, conf_path
+from ingestworker.repo.image import ImageRepository
 from ingestworker.service.ingest import IngestService
 
 cfg = Config.from_yaml(conf_path)
@@ -15,12 +16,13 @@ class Container(containers.DeclarativeContainer):
         cfg=cfg.storage
     )
 
-    index_client: providers.Provider[AsyncHttpIndexClient] = providers.Factory(
-        AsyncHttpIndexClient,
-        base_url=cfg.indexapi.url
+    repo: providers.Provider[ImageRepository] = providers.Singleton(
+        ImageRepository,
+        cfg=cfg.milvus_db
     )
 
     ingest_service = providers.Singleton(
         IngestService,
-        index_client=index_client,
+        repo=repo,
+        storage=storage,
     )
