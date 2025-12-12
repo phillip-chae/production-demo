@@ -1,0 +1,80 @@
+
+# Make it consistent with container host OS and CUDA version for better compatibility.
+ARG CUDA_VERSION=13.0.0
+ARG OS_VERSION=ubuntu24.04
+
+# ==============================================================================
+# BUILD STAGE
+# ==============================================================================
+# Use a development image with the full CUDA toolkit for compiling dependencies.
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-${OS_VERSION} AS builder
+
+ARG HOME="/etc/production-demo"
+
+# Set environment variables to prevent interactive prompts during installation.
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHON_VERSION=3.13
+
+RUN apt-get update &&\
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        git 
+
+WORKDIR "${HOME}"
+# Copy dependency manifests first for better layer caching
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+COPY pyproject.toml uv.lock ./
+COPY ingestworker/pyproject.toml ingestworker/pyproject.toml
+COPY shared shared
+
+# Sync dependencies into venv using uv (mounted from official container)
+ARG NAME
+RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${NAME} \
+    uv sync --project ingestworker --extra gpu \
+        --link-mode copy \
+        --compile-bytecode  \
+        --no-install-project \
+        --no-editable
+    
+# ==============================================================================
+# PRODUCTION STAGE
+# ==============================================================================
+# Use a slim runtime image which is much smaller and more secure.
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-runtime-${OS_VERSION}
+
+ARG HOME="/etc/production-demo"
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="${HOME}/.venv/bin:$PATH"
+ENV PYTHONPATH="${HOME}/ingestworker"
+ENV DEEPFACE_HOME="${HOME}/ai"
+
+RUN apt-get update &&\
+    apt-get install -y --no-install-recommends \
+        cusparselt-cuda-13 \
+        libgl1 \
+        libmagic1 \
+        libglib2.0-0 &&\
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR "${HOME}"
+
+# Bring the Python install and virtual environment from the builder stage
+COPY --from=builder ${HOME}/.local/share/uv/python ${HOME}/.local/share/uv/python
+COPY --from=builder ${HOME}/.venv ${HOME}/.venv
+
+WORKDIR "${HOME}/searchapi"
+COPY conf/searchapi.yaml conf/searchapi.yaml
+COPY searchapi searchapi
+
+# Generate version.py
+ARG VER
+ARG NAME
+ARG BUILD_TIME
+ARG GIT_REVISION
+RUN echo "MODULE_NAME = \"${NAME}\"\nVERSION = \"${VER}\"\nBUILD_TIME = \"${BUILD_TIME}\"\nGIT_REVISION = \"${GIT_REVISION}\"" > "${NAME}/version.py"
+
+# ENTRYPOINT ["sleep", "infinity"]
+ENTRYPOINT ["python3", "-m", "uvicorn", "searchapi.main:app", "--host", "0.0.0.0", "--port", "8000"]
