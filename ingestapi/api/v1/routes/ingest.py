@@ -4,7 +4,7 @@ from dependency_injector.wiring import inject, Provide
 
 from ingestapi.container import Container
 from ingestapi.service.ingest import IngestService
-from . import version
+from .. import version
 
 tag = "ingest"
 prefix = f"/api/{version}/ingest"
@@ -23,7 +23,10 @@ async def create_ingest(
 ):
     try:
         file_bytes = await file.read()
-        res = await ingest_service.create_ingest(file_bytes)
+        res = await ingest_service.create_ingest(
+            file_bytes,
+            file_name=file.filename if file.filename else "unknown"
+        )
         return JSONResponse(content={"task_id": res})
     
     except Exception as e:

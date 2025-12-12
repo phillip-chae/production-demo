@@ -5,7 +5,7 @@ from uuid_extensions import uuid7str
 from typing import cast
 
 from shared.storage import Storage
-from shared.model.ingest import INGEST_BUCKET
+from shared.constant import INGEST_BUCKET
 from ingestworker.task import INGEST_TASK
 from . import StorageUploadError, CeleryTaskError
 
@@ -24,7 +24,11 @@ class IngestService:
         self.storage = storage
         self.celery = celery
 
-    async def create_ingest(self, file: bytes) -> str:
+    async def create_ingest(
+        self, 
+        file: bytes, 
+        file_name: str
+    ) -> str:
         """Create an ingest task to process the given file."""
 
         key = uuid7str()

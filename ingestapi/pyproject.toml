@@ -14,6 +14,7 @@ dependencies = [
     "uvicorn>=0.38.0",
     "shared",
     "uuid7>=0.1.0",
+    "betterproto2[all]>=0.9.1",
 ]
 
 [tool.uv]
@@ -21,3 +22,9 @@ package = false
 
 [tool.uv.sources]
 shared = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "betterproto2-compiler>=0.9.0",
+    "grpcio-tools>=1.76.0",
+]
