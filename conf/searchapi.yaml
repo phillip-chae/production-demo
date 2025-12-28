@@ -1,0 +1,7 @@
+S3:
+  Host: minio
+  Port: 9000
+
+MilvusDb: 
+  Host: milvus-standalone
+  Port: 19530

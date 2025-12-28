@@ -37,6 +37,7 @@ def init_svcs(**kwargs):
 
 
 def init():
+    from . import project_root
     from pathlib import Path
     from shared.model.index import INDEX_BUCKET
     from shared.storage.s3 import S3
@@ -52,7 +53,6 @@ def init():
 
     # Add sample data ingestion
     svc = container.ingest_service()
-    project_root = Path(__file__).parent.parent
     sample_images = Path(project_root / "data" / "train").rglob("*.JPEG")
     for img_path in sample_images:
         logger.info(f"pre-ingesting sample image: {img_path}")

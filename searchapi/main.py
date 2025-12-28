@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
 
-from searchapi.config import service_name
 from searchapi.container import Container
 from searchapi.api.router import router
 app = FastAPI(

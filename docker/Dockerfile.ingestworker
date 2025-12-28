@@ -10,10 +10,20 @@ ARG OS_VERSION=ubuntu24.04
 FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-${OS_VERSION} AS builder
 
 ARG HOME="/etc/production-demo"
+ARG TIMM_MODELS=""
+ARG OPENCLIP_MODEL="ViT-SO400M-16-SigLIP2-384"
 
 # Set environment variables to prevent interactive prompts during installation.
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHON_VERSION=3.13
+
+# Centralize all model/cache downloads in an image-owned path so we can copy it
+# into the runtime stage (and avoid re-downloading on every container start).
+ENV XDG_CACHE_HOME="${HOME}/.cache" \
+    TORCH_HOME="${HOME}/.cache/torch" \
+    HF_HOME="${HOME}/.cache/huggingface" \
+    HF_HUB_CACHE="${HOME}/.cache/huggingface/hub" \
+    TRANSFORMERS_CACHE="${HOME}/.cache/huggingface/transformers"
 
 RUN apt-get update &&\
     apt-get install -y --no-install-recommends \
@@ -36,6 +46,17 @@ RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${NAME} \
         --compile-bytecode  \
         --no-install-project \
         --no-editable
+
+# Pre-download model weights into the image cache during build.
+# - `timm` weights land in `$TORCH_HOME` and/or `$HF_HOME` depending on the model.
+# - `open_clip` weights typically use `$HF_HOME`.
+RUN mkdir -p "${XDG_CACHE_HOME}" "${TORCH_HOME}" "${HF_HOME}" && \
+        if [ -n "${TIMM_MODELS}" ]; then \
+            "${HOME}/.venv/bin/python" -c "import os, timm; models=os.environ.get('TIMM_MODELS','').split(); [timm.create_model(m, pretrained=True, num_classes=0, global_pool='avg') for m in models]"; \
+        fi && \
+        if [ -n "${OPENCLIP_MODEL}" ]; then \
+            "${HOME}/.venv/bin/python" -c "import os, open_clip; name=os.environ.get('OPENCLIP_MODEL'); pt=dict(open_clip.list_pretrained()).get(name); open_clip.create_model_and_transforms(name, pretrained=pt); open_clip.get_tokenizer(name)"; \
+        fi
     
 # ==============================================================================
 # PRODUCTION STAGE
@@ -49,6 +70,11 @@ ARG HOME="/etc/production-demo"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="${HOME}/.venv/bin:$PATH"
 ENV PYTHONPATH="${HOME}"
+ENV XDG_CACHE_HOME="${HOME}/.cache" \
+    TORCH_HOME="${HOME}/.cache/torch" \
+    HF_HOME="${HOME}/.cache/huggingface" \
+    HF_HUB_CACHE="${HOME}/.cache/huggingface/hub" \
+    TRANSFORMERS_CACHE="${HOME}/.cache/huggingface/transformers"
 
 RUN apt-get update &&\
     apt-get install -y --no-install-recommends \
@@ -63,6 +89,7 @@ WORKDIR "${HOME}"
 # Bring the Python install and virtual environment from the builder stage
 COPY --from=builder ${HOME}/.local/share/uv/python ${HOME}/.local/share/uv/python
 COPY --from=builder ${HOME}/.venv ${HOME}/.venv
+COPY --from=builder ${HOME}/.cache ${HOME}/.cache
 COPY conf/ingestworker.yaml conf/ingestworker.yaml
 COPY ingestworker ingestworker
 

@@ -14,14 +14,22 @@ class ImageRepository(AsyncMilvusRepository[IndexItem]):
             collection_name=self.collection_name,
             data=[embedding],
             anns_field="vector",
-            param={
+            search_params={
                 "metric_type": "COSINE", 
                 "params": {
-                    "ef": 256
+                    "ef": 256,
                 }
             },
             limit=20,
-            output_fields=["id"],
+            output_fields=["file_name"],
         )
+        print(results)
         hits = results[0] if results else []
-        return [IndexItem(**hit) for hit in hits]
+        items = []
+        for hit in hits:
+            item = IndexItem()
+            item.id = hit.get("id", "")
+            item.distance = hit.get("distance", 0.0)
+            item.file_name = hit.get("entity", {}).get("file_name", "")
+            items.append(item)
+        return items

@@ -1,7 +1,7 @@
 from logging import getLogger
 from magic import Magic
 
-from shared.storage import Storage
+from shared.storage.s3 import S3
 from shared.constant import INGEST_BUCKET
 from searchapi.repo.image import ImageRepository
 from . import MilvusError
@@ -13,7 +13,7 @@ class ImageService:
     def __init__(
         self,
         repo: ImageRepository,
-        storage: Storage,
+        storage: S3,
     ):
         from shared.ai.encode import ClipEncoder
         if not storage.check_connection(INGEST_BUCKET):
@@ -33,3 +33,12 @@ class ImageService:
         except Exception as e:
             logger.error("failed to create search task", exc_info=e)
             raise MilvusError("failed to create search task") from e
+        
+    async def get_embedding(self, text: str) -> list[float]:
+        """Get the embedding for the given text."""
+        try:
+            embedding = self.encoder.encode_text(text)
+            return embedding
+        except Exception as e:
+            logger.error("failed to get embedding", exc_info=e)
+            return []

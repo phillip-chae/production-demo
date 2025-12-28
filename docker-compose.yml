@@ -104,6 +104,74 @@ services:
     networks:
       - production-demo-network
 
+
+  searchapi:
+    image: production-demo/searchapi:${IMAGE_TAG}
+    container_name: production-demo-searchapi
+    # Enable GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.searchapi.entrypoints=web
+      - traefik.http.routers.searchapi.rule=Host(`search.${PROJECT_DOMAIN}`)
+      - traefik.http.routers.searchapi.service=searchapi
+      - traefik.http.services.searchapi.loadbalancer.server.port=8000
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    depends_on:
+      - milvus-standalone
+      - minio
+      - redis
+    networks:
+      - production-demo-network
+
+
+  ingestworker:
+    image: production-demo/ingestworker:${IMAGE_TAG}
+    container_name: production-demo-ingestworker
+    # Enable GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - milvus-standalone
+      - minio
+    networks:
+      - production-demo-network
+    
+  ingestapi:
+    image: production-demo/ingestapi:${IMAGE_TAG}
+    container_name: production-demo-ingestapi
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ingestapi.entrypoints=web
+      - traefik.http.routers.ingestapi.rule=Host(`ingest.${PROJECT_DOMAIN}`)
+      - traefik.http.routers.ingestapi.service=ingestapi
+      - traefik.http.services.ingestapi.loadbalancer.server.port=8000
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - ingestworker
+    networks:
+      - production-demo-network
+
 volumes:
   production-demo-redis:
     external: true

@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query, Depends
 from dependency_injector.wiring import inject, Provide
+from typing import Annotated
 
 from searchapi.container import Container
 from searchapi.service.image import ImageService
@@ -17,9 +17,9 @@ router = APIRouter(prefix=prefix, tags=[tag])
 )
 @inject
 async def get_search(
-    text: str = Query(..., description="Text to be used for image search"),
+    text: Annotated[str, Query(..., description="Text to be used for image search")],
     # injected dependencies
-    svc: ImageService = Provide[Container.svc]
+    svc: Annotated[ImageService, Depends(Provide[Container.svc])],
 ):
     try:
         return await svc.create_search(text)

@@ -10,10 +10,18 @@ ARG OS_VERSION=ubuntu24.04
 FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-${OS_VERSION} AS builder
 
 ARG HOME="/etc/production-demo"
+ARG TIMM_MODELS=""
+ARG OPENCLIP_MODEL="ViT-SO400M-16-SigLIP2-384"
 
 # Set environment variables to prevent interactive prompts during installation.
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHON_VERSION=3.13
+
+ENV XDG_CACHE_HOME="${HOME}/.cache" \
+    TORCH_HOME="${HOME}/.cache/torch" \
+    HF_HOME="${HOME}/.cache/huggingface" \
+    HF_HUB_CACHE="${HOME}/.cache/huggingface/hub" \
+    TRANSFORMERS_CACHE="${HOME}/.cache/huggingface/transformers"
 
 RUN apt-get update &&\
     apt-get install -y --no-install-recommends \
@@ -25,17 +33,25 @@ WORKDIR "${HOME}"
 # Copy dependency manifests first for better layer caching
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 COPY pyproject.toml uv.lock ./
-COPY ingestworker/pyproject.toml ingestworker/pyproject.toml
+COPY searchapi/pyproject.toml searchapi/pyproject.toml
 COPY shared shared
 
 # Sync dependencies into venv using uv (mounted from official container)
 ARG NAME
 RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${NAME} \
-    uv sync --project ingestworker --extra gpu \
+    uv sync --project searchapi --extra gpu \
         --link-mode copy \
         --compile-bytecode  \
         --no-install-project \
         --no-editable
+
+RUN mkdir -p "${XDG_CACHE_HOME}" "${TORCH_HOME}" "${HF_HOME}" && \
+        if [ -n "${TIMM_MODELS}" ]; then \
+            "${HOME}/.venv/bin/python" -c "import os, timm; models=os.environ.get('TIMM_MODELS','').split(); [timm.create_model(m, pretrained=True, num_classes=0, global_pool='avg') for m in models]"; \
+        fi && \
+        if [ -n "${OPENCLIP_MODEL}" ]; then \
+            "${HOME}/.venv/bin/python" -c "import os, open_clip; name=os.environ.get('OPENCLIP_MODEL'); pt=dict(open_clip.list_pretrained()).get(name); open_clip.create_model_and_transforms(name, pretrained=pt); open_clip.get_tokenizer(name)"; \
+        fi
     
 # ==============================================================================
 # PRODUCTION STAGE
@@ -50,6 +66,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="${HOME}/.venv/bin:$PATH"
 ENV PYTHONPATH="${HOME}/ingestworker"
 ENV DEEPFACE_HOME="${HOME}/ai"
+ENV XDG_CACHE_HOME="${HOME}/.cache" \
+    TORCH_HOME="${HOME}/.cache/torch" \
+    HF_HOME="${HOME}/.cache/huggingface" \
+    HF_HUB_CACHE="${HOME}/.cache/huggingface/hub" \
+    TRANSFORMERS_CACHE="${HOME}/.cache/huggingface/transformers"
 
 RUN apt-get update &&\
     apt-get install -y --no-install-recommends \
@@ -64,8 +85,9 @@ WORKDIR "${HOME}"
 # Bring the Python install and virtual environment from the builder stage
 COPY --from=builder ${HOME}/.local/share/uv/python ${HOME}/.local/share/uv/python
 COPY --from=builder ${HOME}/.venv ${HOME}/.venv
+COPY --from=builder ${HOME}/.cache ${HOME}/.cache
 
-WORKDIR "${HOME}/searchapi"
+COPY ingestworker ingestworker
 COPY conf/searchapi.yaml conf/searchapi.yaml
 COPY searchapi searchapi
 
