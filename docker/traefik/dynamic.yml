@@ -1,0 +1,10 @@
+# Dynamic configuration
+http:
+  middlewares:
+    user-auth:
+      basicAuth:
+        removeHeader: true
+        users:
+          # Username: admin
+          # Password: changeme
+          - "admin:$apr1$8k7da5.g$zFaU85XDkif2U1K9hQ7Yu/"

@@ -1,0 +1,30 @@
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: production-demo-network
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+api:
+  dashboard: true
+  insecure: true
+  debug: true
+
+log:
+  level: DEBUG
+
+accessLog:
+  bufferingSize: 100
+
+entryPoints:
+  web:
+    address: ":80"    
+    transport:
+      respondingTimeouts:
+        readTimeout: "10s"
+        writeTimeout: "10s"
+        idleTimeout: "5s"
+  websecure:
+    address: ":443"

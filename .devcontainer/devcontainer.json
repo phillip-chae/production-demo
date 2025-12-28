@@ -66,7 +66,7 @@
 	// "forwardPorts": [],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "uv sync --extra gpu --link-mode=copy",
+	"postCreateCommand": "uv sync --extra gpu --link-mode=copy"
 
 	// Configure tool-specific properties.
 	// "customizations": {},
